@@ -715,7 +715,7 @@ window.FM = {
         const deployment_id=action==='rollback'?prompt('배포 ID'):'';
         try{const r=await fetch(API+'/files/archive',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,paths:paths.split(',').filter(Boolean),destination,deployment_id})});const d=await r.json();if(!r.ok)throw Error(d.message);alert(d.deployment_id?'복구 ID: '+d.deployment_id:'완료');await FM.refresh();}catch(e){showToast(e.message,'error');}
     },
-    async upload(fileList){await CSTransfers.enqueue(API,getSelDir(),fileList,()=>FM.refresh());}
+    async upload(fileList){try{await CSTransfers.enqueue(API,getSelDir(),fileList,()=>FM.refresh());}catch(e){showToast('업로드 시작 실패: '+e.message,'error');}}
 
 };
 
