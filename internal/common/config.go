@@ -50,7 +50,7 @@ type ObservabilityConfig struct {
 	} `yaml:"influxdb"`
 
 	// GrafanaURL is a hint shown in the UI for linking to dashboards.
-	// CraftStack does not provision Grafana — import docs/grafana/craftstack-dashboard.json manually.
+	// The managed stack is configured separately through the Infrastructure page.
 	GrafanaURL string `yaml:"grafana_url"`
 }
 
@@ -58,8 +58,8 @@ type ObservabilityConfig struct {
 // See docs/mc-operator-integration.md.
 type MCOperatorConfig struct {
 	Enabled bool   `yaml:"enabled"`
-	URL     string `yaml:"url"`           // e.g. http://mc-operator:8080
-	Token   string `yaml:"token"`         // Bearer token for /api/v1/triggers/jenkins
+	URL     string `yaml:"url"`   // e.g. http://mc-operator:8080
+	Token   string `yaml:"token"` // Bearer token for /api/v1/triggers/jenkins
 	Jenkins struct {
 		// ForwardPath exposes an inbound Jenkins webhook on the master that
 		// forwards to mc-operator after audit logging.

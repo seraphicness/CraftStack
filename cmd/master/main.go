@@ -116,8 +116,8 @@ func main() {
 	go backupScheduler.Start()
 	defer backupScheduler.Stop()
 
-	// Observability (Prometheus + InfluxDB). Grafana is not provisioned here —
-	// see docs/monitoring.md for the standard scrape/import flow.
+	// Observability exporters; the web infrastructure manager provisions the
+	// optional Prometheus/Loki/Grafana stack. See docs/monitoring.md.
 	obsOpts := web.ObservabilityOptions{
 		PrometheusEnabled: cfg.Observability.Prometheus.Enabled,
 		PrometheusPath:    cfg.Observability.Prometheus.Path,
@@ -154,6 +154,7 @@ func main() {
 	go func() {
 		for lb := range grpcServer.LogBroadcasts() {
 			webServer.Hub().Broadcast(lb.InstanceID, lb.Line)
+			webServer.ForwardInfrastructureLog(lb.InstanceID, lb.Line, lb.Timestamp)
 		}
 	}()
 
@@ -167,6 +168,7 @@ func main() {
 	// Start InfluxDB pusher if configured
 	obsCtx, obsCancel := context.WithCancel(context.Background())
 	defer obsCancel()
+	go webServer.RunInfrastructureLogs(obsCtx)
 	if cfg.Observability.InfluxDB.Enabled && cfg.Observability.InfluxDB.URL != "" {
 		pusher := observability.NewInfluxPusher(
 			cfg.Observability.InfluxDB.URL,

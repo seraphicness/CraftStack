@@ -170,6 +170,12 @@ func (s *fileManagerServiceImpl) Archive(ctx context.Context, r *pb.ArchiveReque
 		return nil, e
 	}
 	switch r.Action {
+	case "snapshot":
+		id := fmt.Sprintf("deploy-%d", time.Now().UnixNano())
+		if e = zipPaths(ctx, root, []string{"."}, filepath.Join(state, id+".zip")); e != nil {
+			return nil, e
+		}
+		return &pb.ArchiveResponse{Success: true, DeploymentId: id}, nil
 	case "compress":
 		if len(r.Paths) == 0 || dst == root {
 			return nil, fmt.Errorf("select files and an output ZIP")

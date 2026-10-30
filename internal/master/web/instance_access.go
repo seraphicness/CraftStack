@@ -22,6 +22,9 @@ func (s *Server) instanceAccess(next echo.HandlerFunc) echo.HandlerFunc {
 			return next(c)
 		}
 		path := c.Path()
+		if path == "/ai" || strings.HasPrefix(path, "/api/ai/") {
+			return next(c)
+		}
 		if path == "/" {
 			return c.Redirect(302, "/instances")
 		}

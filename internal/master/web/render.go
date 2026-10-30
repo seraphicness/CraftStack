@@ -87,11 +87,11 @@ func buildPageHTML(page string, data map[string]interface{}) string {
 	// adminonly user management link display
 	usersLink := ""
 	if currentRole == "admin" {
-		usersLink = `<li><a href="/operations">운영 작업</a></li>` + fmt.Sprintf(`<li><a href="/users" class="%s">user</a></li>`, activeClass(page, "users"))
+		usersLink = `<li><a href="/infrastructure">인프라</a></li><li><a href="/operations">운영 작업</a></li>` + fmt.Sprintf(`<li><a href="/users" class="%s">user</a></li>`, activeClass(page, "users"))
 	}
 
 	// audit log link (all authenticated users)
-	auditLink := fmt.Sprintf(`<li><a href="/audit" class="%s">audit log</a></li>`, activeClass(page, "audit"))
+	auditLink := `<li><a href="/ai">AI 작업</a></li>` + fmt.Sprintf(`<li><a href="/audit" class="%s">audit log</a></li>`, activeClass(page, "audit"))
 
 	roleBadge := ""
 	switch currentRole {
@@ -290,6 +290,10 @@ func activeClass(current, page string) string {
 // buildPartialHTML generates HTML for each page/partial.
 func buildPartialHTML(name string, data map[string]interface{}) string {
 	switch name {
+	case "ai":
+		return buildAIHTML(data)
+	case "infrastructure":
+		return buildInfrastructureHTML()
 	case "operations":
 		return buildOperationsHTML()
 	case "dashboard":

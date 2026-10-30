@@ -2,8 +2,7 @@
 //
 // The Prometheus exporter emits the text exposition format directly — no
 // client_golang dependency — by reading snapshots from a MetricsSource.
-// Grafana is intentionally not provisioned from code; import the dashboard
-// JSON at docs/grafana/craftstack-dashboard.json manually.
+// The infrastructure package provisions the optional managed monitoring stack.
 package observability
 
 import (

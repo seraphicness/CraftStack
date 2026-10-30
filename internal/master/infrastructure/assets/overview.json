@@ -1,0 +1,98 @@
+{
+  "title": "CraftStack Overview",
+  "uid": "craftstack-overview",
+  "schemaVersion": 38,
+  "version": 1,
+  "timezone": "",
+  "time": {"from": "now-1h", "to": "now"},
+  "refresh": "30s",
+  "tags": ["craftstack"],
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {"text": "Prometheus", "value": "Prometheus"}
+      },
+      {
+        "name": "node",
+        "type": "query",
+        "datasource": {"type": "prometheus", "uid": "$datasource"},
+        "query": "label_values(craftstack_node_cpu_percent, node)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Node CPU %",
+      "datasource": {"type": "prometheus", "uid": "$datasource"},
+      "targets": [
+        {"expr": "craftstack_node_cpu_percent{node=~\"$node\"}", "legendFormat": "{{node}}"}
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100}}
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Node Memory %",
+      "datasource": {"type": "prometheus", "uid": "$datasource"},
+      "targets": [
+        {"expr": "craftstack_node_memory_percent{node=~\"$node\"}", "legendFormat": "{{node}}"}
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100}}
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Node Disk %",
+      "datasource": {"type": "prometheus", "uid": "$datasource"},
+      "targets": [
+        {"expr": "craftstack_node_disk_percent{node=~\"$node\"}", "legendFormat": "{{node}}"}
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100}}
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Instance CPU %",
+      "datasource": {"type": "prometheus", "uid": "$datasource"},
+      "targets": [
+        {"expr": "craftstack_instance_cpu_percent", "legendFormat": "{{instance}} ({{type}})"}
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Instance Memory (MB)",
+      "datasource": {"type": "prometheus", "uid": "$datasource"},
+      "targets": [
+        {"expr": "craftstack_instance_memory_used_mb", "legendFormat": "{{instance}} used"},
+        {"expr": "craftstack_instance_memory_limit_mb", "legendFormat": "{{instance}} limit"}
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "fieldConfig": {"defaults": {"unit": "decmbytes"}}
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Instance Network (rate)",
+      "datasource": {"type": "prometheus", "uid": "$datasource"},
+      "targets": [
+        {"expr": "rate(craftstack_instance_net_rx_bytes[5m])", "legendFormat": "rx {{instance}}"},
+        {"expr": "rate(craftstack_instance_net_tx_bytes[5m])", "legendFormat": "tx {{instance}}"}
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "fieldConfig": {"defaults": {"unit": "Bps"}}
+    }
+  ]
+}

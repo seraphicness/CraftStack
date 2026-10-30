@@ -1,9 +1,11 @@
 package web
 
 import (
+	"craftstack/internal/master/infrastructure"
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"os"
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -16,8 +18,8 @@ import (
 	webfs "craftstack/web"
 )
 
-// ObservabilityOptions configures the Prometheus exporter route. Grafana is
-// not provisioned here; operators import docs/grafana/craftstack-dashboard.json.
+// ObservabilityOptions configures metrics and optional external Grafana links.
+// The infrastructure manager provisions the managed observability stack.
 type ObservabilityOptions struct {
 	PrometheusEnabled bool
 	PrometheusPath    string // default "/metrics"
@@ -92,6 +94,8 @@ type MeshProvider interface {
 
 // Server holds dependencies for the web server.
 type Server struct {
+	ai        *aiRuntime
+	infra     *infrastructure.Manager
 	echo      *echo.Echo
 	db        *store.DB
 	log       *slog.Logger
@@ -154,12 +158,24 @@ func NewServer(db *store.DB, log *slog.Logger, connector AgentConnector, w *watc
 		log.Info("========================================")
 	}
 
+	infraDir := os.Getenv("CRAFTSTACK_INFRA_DIR")
+	if infraDir == "" {
+		infraDir = "data/infrastructure"
+	}
+	s.infra = infrastructure.New(infraDir)
+	aiRoot := os.Getenv("CRAFTSTACK_AI_HOME")
+	if aiRoot == "" {
+		aiRoot = "data/ai"
+	}
+	s.ai = newAIRuntime(aiRoot)
+	_, _ = s.db.Exec("UPDATE ai_jobs SET status='interrupted',error='Master restarted; inspect workspace before restarting the task' WHERE status IN ('running','applying')")
 	s.registerRoutes()
 	return s
 }
 
 // registerRoutes sets up all HTTP routes.
 func (s *Server) registerRoutes() {
+	s.echo.GET("/internal/infrastructure/metrics", s.infrastructureMetrics)
 	// Static files - served from embedded filesystem (single binary)
 	staticFS, err := fs.Sub(webfs.StaticFS, "static")
 	if err != nil {
@@ -220,6 +236,21 @@ func (s *Server) registerRoutes() {
 	// user management (admin only)
 	auth.GET("/users", s.handleUsersPage, s.adminOnly)
 
+	auth.GET("/ai", s.handleAI)
+	auth.GET("/api/ai/workspaces", s.apiAIWorkspaces)
+	auth.POST("/api/ai/workspaces", s.apiAISaveWorkspace, s.adminOnly)
+	auth.GET("/api/ai/grants", s.apiAIGrants, s.adminOnly)
+	auth.PUT("/api/ai/grants", s.apiAIGrant, s.adminOnly)
+	auth.GET("/api/ai/jobs", s.apiAIJobs)
+	auth.POST("/api/ai/jobs", s.apiAIStart)
+	auth.GET("/api/ai/jobs/:jobID", s.apiAIJob)
+	auth.POST("/api/ai/jobs/:jobID", s.apiAIJobControl)
+	auth.GET("/api/ai/jobs/:jobID/changes", s.apiAIChanges)
+	auth.POST("/api/ai/jobs/:jobID/apply", s.apiAIApply)
+	auth.GET("/infrastructure", s.handleInfrastructure, s.adminOnly)
+	auth.GET("/api/infrastructure", s.apiInfrastructure, s.adminOnly)
+	auth.POST("/api/infrastructure", s.apiInfrastructureAction, s.adminOnly)
+	auth.GET("/api/infrastructure/credentials", s.apiInfrastructureCredentials, s.adminOnly)
 	auth.GET("/operations", s.handleOperations, s.adminOnly)
 	auth.GET("/api/operations", s.apiOperations, s.adminOnly)
 	auth.POST("/api/operations", s.apiSaveOperation, s.adminOnly)

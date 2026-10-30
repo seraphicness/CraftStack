@@ -25,7 +25,8 @@ CraftStack is a distributed infrastructure management platform based on the **Ma
 - **No CGO required** — pure Go build. Cross-compiled to run on Linux, Windows, or macOS.
 - **Docker CLI based** — calls the CLI directly without the Docker SDK, keeping `CGO_ENABLED=0`.
 - **Dependency verification** — returns clear errors when Docker/WireGuard is not installed (no auto-install; manual installation required).
-- **Observability** — exposes Prometheus `/metrics` and supports InfluxDB v2 push. Grafana dashboard JSON is provided (`docs/grafana/`).
+- **Observability** — automatic Prometheus, Loki and Grafana download/configuration with metrics and log dashboards ([setup](docs/monitoring.md)).
+- **AI agents** — Codex and Claude Code command window, administrator login, per-user/workspace grants, local projects and remote server snapshots with reviewed apply ([setup](docs/ai-agents.md)).
 - **mc-operator integration** — Jenkins webhook bridge and SSE event consumer for [devvelvet/mc-operator](https://github.com/devvelvet/mc-operator) (`docs/mc-operator-integration.md`).
 - **Realtime** — WebSocket console log streaming and HTMX-based live dashboard.
 - **Auth / permissions** — user signup/approval workflow and 3-tier role-based access control (Admin / Editor / Viewer).
