@@ -133,6 +133,56 @@ Unified management of six service types running as Docker containers.
 - Admin operations page: `/operations`
 - Upgrade master and agents together; see [docs/operations.md](docs/operations.md) for configuration, workflows and limits
 
+### Automatic monitoring infrastructure
+
+The administrator's **Infrastructure** page (`/infrastructure`) downloads and
+starts Prometheus, Loki and Grafana with Docker Compose. Metric collection,
+log forwarding, data sources and dashboards are configured automatically.
+
+1. Install and start Docker with Compose v2 on the **Master** host.
+2. Open Infrastructure and set the Master URL reachable from Docker, normally
+   `http://host.docker.internal:8080`. Select automatic installation.
+3. Follow installation progress and readiness checks, then reveal the generated
+   initial Grafana credentials using the administrator button.
+
+Default ports are Grafana **3000**, Prometheus **9095** and Loki **3100**,
+bound to the Master's **127.0.0.1**. Remote access requires an SSH tunnel or an
+authenticated reverse proxy. Stop/start retains data in named volumes.
+Live log forwarding uses bounded buffering and retries; it is not a durable archive.
+
+See [monitoring setup](docs/monitoring.md) for retention, persistent storage
+and external monitoring integration.
+
+### AI agent command window
+
+The **AI Agents** page (`/ai`) supports **Codex** and **Claude Code**.
+An administrator authenticates each provider once and grants selected users
+access by workspace and provider, with separate edit and remote-apply permissions.
+
+| Workspace | Execution and review |
+|---|---|
+| Master project folder | Work directly in a registered folder; review changes with Git |
+| Remote server folder | Download a working copy, run the agent, review changes, then explicitly apply to the stopped instance |
+
+The window includes streamed output, task history, cancellation and follow-up
+instructions for completed local sessions. Remote apply checks for conflicts
+and creates a recovery snapshot; failed writes trigger rollback. Revoking a
+grant cancels matching active tasks. Viewers remain read-only.
+
+1. Install Node.js/npm on the Master and use **CLI automatic installation**, or
+   make the official CLIs available on PATH.
+2. As an administrator, select a provider and complete its browser/device login.
+3. Register a local project or remote instance subfolder and grant user access.
+4. Select the workspace/provider in the command window and submit a task.
+
+Remote copies are limited to **10,000 files / 1 GiB**. Jobs time out after
+**30 minutes**, with at most four concurrent jobs and one per workspace.
+Native CLI processes run with the Master OS account: grant access only to
+trusted operators. Workspace grants do not provide OS-level user isolation.
+
+See [AI agent setup](docs/ai-agents.md) for credentials, provider tool
+restrictions, permissions, storage and remote-apply behavior.
+
 ### Database browser
 
 - Execute SQL queries against database instances from the web UI
@@ -198,9 +248,9 @@ Docker: 172.30.1.0/24             Docker: 172.30.2.0/24
 
 | Role | Permissions |
 |------|------|
-| **Viewer** | read-only on all pages/APIs |
+| **Viewer** | read-only on permitted resources; AI requires an explicit workspace/provider grant |
 | **Editor** | instance control, create backups, file upload/edit |
-| **Admin** | full CRUD (create/delete instances, networks, sync, user management, Docker install) |
+| **Admin** | full CRUD, user/instance/AI grants, monitoring provisioning and provider authentication |
 
 - User signup → admin approval workflow
 - Cookie-based session management
@@ -212,7 +262,7 @@ Docker: 172.30.1.0/24             Docker: 172.30.2.0/24
 - **Memory** — used/total (MB) and a percentage progress bar
 - **Disk** — used/total (MB) and a percentage progress bar
 - **Container metrics** — CPU, memory, network I/O, block I/O (per instance)
-- **Docker status** — install status, running status, install from the web on agents where Docker is missing
+- **Docker status** — installation and daemon status; install/start Docker on the host when missing or stopped
 - **OS info** — operating system, last response time
 
 ---
@@ -245,7 +295,8 @@ Docker: 172.30.1.0/24             Docker: 172.30.2.0/24
 | Component | Master server | Agent server |
 |---------|------------|-------------|
 | **OS** | Linux / Windows / macOS | Linux / Windows / macOS |
-| **Docker** | not required | required (manual install — no auto-install) |
+| **Docker** | required with Compose v2 for managed monitoring; otherwise optional | required for containers (manual host installation) |
+| **Node.js + npm** | required for AI CLI automatic installation | not required for AI jobs, which run on the Master |
 | **WireGuard** | not required | optional, required to use mesh (manual install — no auto-install) |
 | **Ports** | 8080/tcp, 9090/tcp | 9091/tcp, 51820/udp |
 
@@ -253,8 +304,8 @@ Docker: 172.30.1.0/24             Docker: 172.30.2.0/24
 
 ```bash
 # Clone the repository
-git clone <repository-url>
-cd craftstack
+git clone https://github.com/seraphicness/CraftStack.git
+cd CraftStack
 
 # Build for the current OS/arch
 make build
@@ -273,6 +324,15 @@ make dist
 | Linux | amd64, arm64 | `bin/linux-amd64/`, `bin/linux-arm64/` |
 | Windows | amd64 | `bin/windows-amd64/` |
 | macOS | amd64, arm64 | `bin/darwin-amd64/`, `bin/darwin-arm64/` |
+
+Without Make, build directly with Go:
+
+```bash
+go build -o master ./cmd/master
+go build -o agent ./cmd/agent
+```
+
+On Windows, use `-o master.exe` and `-o agent.exe`.
 
 ### Install the master server
 
@@ -395,6 +455,24 @@ WantedBy=multi-user.target
 
 ---
 
+## Upgrade and persistent data
+
+Upgrade **Master and agents together** for the chunked transfer and archive
+RPCs. Back up the Master SQLite database before upgrading. Schema migrations
+run automatically; the current schema is **15**.
+
+| Data | Default location | Override / notes |
+|---|---|---|
+| Master database | `data/craftstack.db` | `database.path` in Master configuration |
+| Monitoring configuration and initial credentials | `data/infrastructure` | `CRAFTSTACK_INFRA_DIR`; also retain Compose named volumes |
+| AI credentials, tools and remote work copies | `data/ai` | `CRAFTSTACK_AI_HOME`; keep outside registered project folders |
+
+Relative paths resolve from the Master's working directory. Preserve these
+locations across upgrades and protect credentials. See [operations](docs/operations.md)
+for agent-side upload staging and recovery snapshots.
+
+---
+
 ## Port configuration
 
 ### System ports
@@ -406,6 +484,9 @@ WantedBy=multi-user.target
 | Agent gRPC | 9091 | TCP | master → agent commands |
 | WireGuard | 51820 | UDP | mesh network tunnel |
 | DNS server | 53 | UDP | binds to the WG IP only |
+| Managed Grafana | 3000 | TCP | Master loopback only; configurable |
+| Managed Prometheus | 9095 | TCP | Master loopback only; configurable |
+| Managed Loki | 3100 | TCP | Master loopback only; configurable |
 
 ### Instance ports
 
@@ -447,8 +528,8 @@ craftstack/
 │   └── embed.go                      # configs embedded via embed.FS
 │
 ├── proto/craftstack/                 # Protocol Buffer definitions
-│   ├── agent.proto                   # AgentService (16 RPCs)
-│   ├── files.proto                   # FileManagerService (6 RPCs)
+│   ├── agent.proto                   # AgentService
+│   ├── files.proto                   # FileManagerService
 │   ├── metrics.proto                 # MetricsService (3 RPCs)
 │   └── sync.proto                    # SyncService (4 RPCs)
 │
@@ -469,9 +550,11 @@ craftstack/
 │   │   ├── scheduler.go              # scheduled backups (cron)
 │   │   ├── file_pusher.go            # sync file transfer
 │   │   │
+│   │   ├── aiworker/                 # AI CLI execution and process lifecycle
+│   │   ├── infrastructure/           # Compose provisioning and Loki forwarding
 │   │   ├── store/                    # SQLite data layer
 │   │   │   ├── db.go                 # DB initialization + migration engine
-│   │   │   ├── migrations.go         # schema migrations (v1~v13)
+│   │   │   ├── migrations.go         # schema migrations (v1–v15)
 │   │   │   ├── node.go               # node CRUD + WG fields
 │   │   │   ├── instance.go           # instance CRUD
 │   │   │   ├── instance_metrics.go   # instance metrics
@@ -587,13 +670,16 @@ craftstack/
 | Audit log | `/audit` | query API operation history |
 | User management | `/users` | approve users/manage roles (Admin) |
 | Profile | `/profile` | my info |
+| Operations | `/operations` | scheduled restarts, sync preview, permissions and recovery (Admin) |
+| Infrastructure | `/infrastructure` | automatic Prometheus/Loki/Grafana setup (Admin) |
+| AI Agents | `/ai` | task command window; provider login and workspace grants for Admin |
 
 ---
 
 ## API endpoints
 
 <details>
-<summary><strong>Full API list (70+)</strong></summary>
+<summary><strong>API reference</strong></summary>
 
 ### Auth
 | Method | Path | Description |
@@ -607,7 +693,7 @@ craftstack/
 |--------|------|------|------|
 | GET | `/api/nodes` | Viewer | list nodes |
 | GET | `/api/nodes/:id/docker` | Viewer | check Docker status |
-| POST | `/api/nodes/:id/docker/install` | Admin | install Docker remotely |
+| POST | `/api/nodes/:id/docker/install` | Admin | verify Docker readiness; host installation is manual |
 
 ### Instances
 | Method | Path | Permission | Description |
@@ -687,6 +773,20 @@ craftstack/
 |--------|------|------|------|
 | POST | `/api/instances/:id/query` | Editor | execute SQL query |
 
+### Infrastructure and AI
+
+| Method | Path | Permission | Description |
+|---|---|---|---|
+| GET/POST | `/api/infrastructure` | Admin | status; install/start/stop stack |
+| GET | `/api/infrastructure/credentials` | Admin | initial Grafana credentials |
+| GET | `/api/ai/workspaces` | Authenticated | authorized workspaces/providers |
+| POST | `/api/ai/workspaces` | Admin | register workspace |
+| GET/PUT | `/api/ai/grants` | Admin | list, assign or revoke access |
+| GET/POST | `/api/ai/jobs` | Granted user / Admin | task history and execution; authentication/installation require Admin |
+| GET/POST | `/api/ai/jobs/:jobID` | Owner with current grant / Admin | output and cancellation; login input requires Admin |
+| GET | `/api/ai/jobs/:jobID/changes` | Owner with current grant / Admin | remote change review |
+| POST | `/api/ai/jobs/:jobID/apply` | Owner with apply grant / Admin | apply completed remote job |
+
 ### WebSocket
 | Path | Description |
 |------|------|
@@ -711,12 +811,13 @@ craftstack/
 
 ## gRPC service definitions
 
-Four proto files define 29 RPC methods.
+Four proto files define agent control, file operations, metrics and sync services.
+See [proto/craftstack](proto/craftstack) for the authoritative RPC definitions.
 
 <details>
 <summary><strong>Full gRPC service list</strong></summary>
 
-### AgentService (16 RPCs)
+### AgentService
 | Method | Type | Description |
 |--------|------|------|
 | RegisterAgent | Unary | register agent |
@@ -728,7 +829,7 @@ Four proto files define 29 RPC methods.
 | DeleteInstance | Unary | delete instance |
 | RestoreBackup | Unary | restore backup |
 | CheckDocker | Unary | check Docker status |
-| InstallDocker | Unary | install Docker |
+| InstallDocker | Unary | verify Docker readiness (legacy method name) |
 | CreateNetwork / DeleteNetwork / ListNetworks | Unary | network management |
 | ConnectNetwork / DisconnectNetwork | Unary | connect/disconnect networks |
 | ConfigureWireGuard | Unary | configure WG |
@@ -736,7 +837,7 @@ Four proto files define 29 RPC methods.
 | UpdateDNSRecords | Unary | DNS record sync |
 | UploadServerData | Client Stream | large file upload |
 
-### FileManagerService (6 RPCs)
+### FileManagerService
 | Method | Description |
 |--------|------|
 | ListDirectory | browse directory |
@@ -745,6 +846,10 @@ Four proto files define 29 RPC methods.
 | DeleteFile | delete file |
 | CreateDirectory | create folder |
 | RenameFile | rename |
+| CopyFile | recursive copy |
+| ReadChunk / UploadChunk | resumable chunked file transfer |
+| Archive | ZIP operations, deployment snapshots and rollback |
+| GitCommit / GitLog / GitRestore | file history and restoration |
 
 ### MetricsService (3 RPCs)
 | Method | Type | Description |
@@ -797,6 +902,27 @@ make run-agent      # run agent locally
 make clean          # clean build artifacts
 ```
 
+### Validation
+
+```bash
+go test ./...
+go test -race ./...
+go vet ./...
+node --check web/static/js/ai.js
+node --check web/static/js/infrastructure.js
+```
+
+For the real Docker integration test, set `CRAFTSTACK_INFRA_DOCKER_TEST=1` and run:
+
+```bash
+go test ./internal/master/infrastructure -run TestDockerStack -v
+```
+
+This opt-in test downloads images, uses a separate Compose project, verifies
+Grafana provisioning and actual Prometheus/Loki queries, then removes its own
+containers and volumes. AI tests use fake CLI processes; they do not log into
+provider accounts or consume model usage.
+
 ### Dev dependencies
 
 ```bash
@@ -813,7 +939,9 @@ go install github.com/bufbuild/buf/cmd/buf@latest
 | Doc | Contents |
 |---|---|
 | [docs/file-management.md](docs/file-management.md) | File manager UI, audit log, Git history / rollback, REST endpoints |
-| [docs/monitoring.md](docs/monitoring.md) | Prometheus scrape, InfluxDB v2 push, exported metrics, Grafana import |
+| [docs/monitoring.md](docs/monitoring.md) | Automatic Prometheus/Loki/Grafana setup, retention, external monitoring |
+| [docs/ai-agents.md](docs/ai-agents.md) | Codex/Claude Code login, grants, command window and local/remote workspaces |
+| [docs/operations.md](docs/operations.md) | Folder transfers, deployment recovery, sync preview, S3 backups and scheduled operations |
 | [docs/mc-operator-integration.md](docs/mc-operator-integration.md) | Jenkins webhook bridge, mc-imagegen CLI wrapper, SSE events |
 | [docs/grafana/craftstack-dashboard.json](docs/grafana/craftstack-dashboard.json) | Importable Grafana dashboard |
 
@@ -846,7 +974,8 @@ CraftStack depends on the following open-source projects. Each component follows
 
 Integration targets:
 - [devvelvet/mc-operator](https://github.com/devvelvet/mc-operator) — external project. Not included in the CraftStack repository; follows its own license/distribution policy.
-- Prometheus, InfluxDB, Grafana — used under each vendor's license. CraftStack neither bundles nor redistributes them.
+- Prometheus, Loki, Grafana and InfluxDB — separate components under their respective licenses. The managed installer downloads official container images at runtime.
+- Codex and Claude Code — external CLI integrations installed separately or through administrator setup; provider terms and account requirements apply.
 
 <p align="center">
   <sub>CraftStack &mdash; Site Reliability Engineering for Game Servers &middot; MIT Licensed</sub>
