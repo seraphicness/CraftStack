@@ -32,7 +32,7 @@ func (s *Server) apiListSyncMappings(c echo.Context) error {
 		mappings = []*store.SyncMapping{}
 	}
 
-	// each mapping target list together 
+	// each mapping target list together
 	type mappingWithTargets struct {
 		*store.SyncMapping
 		SyncTargets []*store.SyncTarget `json:"sync_targets"`
@@ -367,6 +367,7 @@ func (s *Server) executeSyncJob(mapping *store.SyncMapping, targets []*store.Syn
 	// fetch file list from source agent
 	agentAddr, ok := s.connector.GetAgentAddress(mapping.SourceAgentID)
 	if !ok {
+		s.notifyOperation("sync_failed", mapping.SourceInstanceID, "Source agent offline")
 		s.log.Error("source agent offline", "agent_id", mapping.SourceAgentID)
 		return
 	}
@@ -393,8 +394,14 @@ func (s *Server) executeSyncJob(mapping *store.SyncMapping, targets []*store.Syn
 	s.log.Info("source file collect complete", "mapping", mapping.Name, "files", len(files))
 
 	// 2. each file master cache save + target push
-	cacheDir := mapping.Src
-	os.MkdirAll(cacheDir, 0755)
+	cacheDir, err := os.MkdirTemp("", "craftstack-sync-")
+	if err != nil {
+		s.notifyOperation("sync_failed", mapping.SourceInstanceID, err.Error())
+		return
+	}
+	defer os.RemoveAll(cacheDir)
+	isolated := *mapping
+	isolated.Src = cacheDir
 
 	for _, f := range files {
 		// source from file read (source_path basis relative path absolute path as convert)
@@ -402,26 +409,47 @@ func (s *Server) executeSyncJob(mapping *store.SyncMapping, targets []*store.Syn
 		if mapping.SourcePath != "" && mapping.SourcePath != "." {
 			readPath = mapping.SourcePath + "/" + f
 		}
-		readResp, err := fmClient.ReadFile(ctx, &pb.ReadFileRequest{
-			InstanceId: mapping.SourceInstanceID,
-			Path:       readPath,
-		})
-		if err != nil {
-			s.log.Warn("file read failed", "path", f, "error", err)
+		if excludedSync(f, mapping.ExcludeList()) {
 			continue
+		}
+		cachePath := filepath.Join(cacheDir, filepath.FromSlash(f))
+		if err = os.MkdirAll(filepath.Dir(cachePath), 0755); err != nil {
+			s.notifyOperation("sync_failed", mapping.SourceInstanceID, err.Error())
+			return
+		}
+		output, err := os.Create(cachePath)
+		if err != nil {
+			s.notifyOperation("sync_failed", mapping.SourceInstanceID, err.Error())
+			return
+		}
+		var offset int64
+		for {
+			chunk, e := fmClient.ReadChunk(ctx, &pb.ChunkRequest{InstanceId: mapping.SourceInstanceID, Path: readPath, Offset: offset})
+			if e != nil {
+				err = e
+				break
+			}
+			if _, err = output.Write(chunk.Content); err != nil {
+				break
+			}
+			offset = chunk.Offset
+			if chunk.Complete {
+				break
+			}
+		}
+		closeErr := output.Close()
+		if err == nil {
+			err = closeErr
+		}
+		if err != nil {
+			s.notifyOperation("sync_failed", mapping.SourceInstanceID, err.Error())
+			return
 		}
 
-		// master cache save
-		cachePath := filepath.Join(cacheDir, filepath.FromSlash(f))
-		os.MkdirAll(filepath.Dir(cachePath), 0755)
-		if err := os.WriteFile(cachePath, readResp.Content, 0644); err != nil {
-			s.log.Warn("cache save failed", "path", cachePath, "error", err)
-			continue
-		}
 	}
 
 	// 3. cache → target push
-	s.pushLocalToTargets(mapping, targets)
+	s.pushLocalToTargets(&isolated, targets)
 
 	s.log.Info("sync write complete", "mapping", mapping.Name)
 }
@@ -479,6 +507,9 @@ func (s *Server) pushLocalToTargets(mapping *store.SyncMapping, targets []*store
 			return nil
 		}
 		rel, _ := filepath.Rel(absBase, path)
+		if excludedSync(filepath.ToSlash(rel), mapping.ExcludeList()) {
+			return nil
+		}
 		files = append(files, filepath.ToSlash(rel))
 		return nil
 	})
@@ -486,6 +517,7 @@ func (s *Server) pushLocalToTargets(mapping *store.SyncMapping, targets []*store
 	for _, target := range targets {
 		agentAddr, ok := s.connector.GetAgentAddress(target.AgentID)
 		if !ok {
+			s.notifyOperation("sync_failed", target.InstanceID, "Target agent offline")
 			s.log.Warn("target agent offline", "agent_id", target.AgentID)
 			continue
 		}
@@ -503,23 +535,17 @@ func (s *Server) pushLocalToTargets(mapping *store.SyncMapping, targets []*store
 		failed := 0
 		for _, relFile := range files {
 			localPath := filepath.Join(absBase, filepath.FromSlash(relFile))
-			content, err := os.ReadFile(localPath)
+			info, err := os.Stat(localPath)
 			if err != nil {
+				failed++
 				continue
 			}
-
-			// target path calculate: dest_path + relFile
 			destFile := relFile
 			if target.DestPath != "" && target.DestPath != "." {
 				destFile = target.DestPath + "/" + relFile
 			}
+			err = pushSyncFile(ctx, fmClient, target.InstanceID, destFile, localPath, info.Size())
 
-			_, err = fmClient.WriteFile(ctx, &pb.WriteFileRequest{
-				InstanceId: target.InstanceID,
-				Path:       destFile,
-				Content:    content,
-				CreateDirs: true,
-			})
 			if err != nil {
 				s.log.Warn("file transfer failed", "file", relFile, "target", target.InstanceID, "error", err)
 				failed++
@@ -528,7 +554,7 @@ func (s *Server) pushLocalToTargets(mapping *store.SyncMapping, targets []*store
 					InstanceID: &target.InstanceID,
 					NodeID:     &target.AgentID,
 					FilePath:   destFile,
-					FileSize:   int64(len(content)),
+					FileSize:   info.Size(),
 					Action:     "push",
 					Status:     "failed",
 					ErrorMsg:   &errMsg,
@@ -540,7 +566,7 @@ func (s *Server) pushLocalToTargets(mapping *store.SyncMapping, targets []*store
 				InstanceID: &target.InstanceID,
 				NodeID:     &target.AgentID,
 				FilePath:   destFile,
-				FileSize:   int64(len(content)),
+				FileSize:   info.Size(),
 				Action:     "push",
 				Status:     "completed",
 			})
@@ -548,6 +574,11 @@ func (s *Server) pushLocalToTargets(mapping *store.SyncMapping, targets []*store
 
 		cancel()
 		conn.Close()
+		event := "sync_completed"
+		if failed > 0 {
+			event = "sync_failed"
+		}
+		s.notifyOperation(event, target.InstanceID, fmt.Sprintf("%d pushed; %d failed", pushed, failed))
 		s.log.Info("target sync complete", "target", target.InstanceID, "pushed", pushed, "failed", failed, "total", len(files))
 	}
 }
@@ -891,4 +922,29 @@ func (s *Server) apiUploadSyncFile(c echo.Context) error {
 	go s.triggerAutoSync(id)
 
 	return c.JSON(http.StatusOK, map[string]string{"status": "ok", "message": "file upload"})
+}
+
+func pushSyncFile(ctx context.Context, client pb.FileManagerServiceClient, id, dest, source string, total int64) error {
+	f, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	uploadID := fmt.Sprintf("sync-%d", time.Now().UnixNano())
+	var offset int64
+	for {
+		b := make([]byte, 1024*1024)
+		n, e := io.ReadFull(f, b)
+		if e != nil && e != io.EOF && e != io.ErrUnexpectedEOF {
+			return e
+		}
+		r, e := client.UploadChunk(ctx, &pb.UploadChunkRequest{InstanceId: id, Path: dest, UploadId: uploadID, Offset: offset, Total: total, Content: b[:n], Conflict: "overwrite"})
+		if e != nil {
+			return e
+		}
+		offset = r.Offset
+		if r.Complete {
+			return nil
+		}
+	}
 }

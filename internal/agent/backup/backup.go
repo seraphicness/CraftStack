@@ -2,6 +2,7 @@ package backup
 
 import (
 	"archive/zip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -44,7 +45,7 @@ func (m *Manager) CreateBackup(instanceID, sourceDir, label string) (*Result, er
 		return nil, fmt.Errorf("create backup dir: %w", err)
 	}
 
-	timestamp := time.Now().Format("20060102-150405")
+	timestamp := time.Now().Format("20060102-150405.000000000")
 	filename := fmt.Sprintf("%s_%s_%s.zip", instanceID, label, timestamp)
 	backupPath := filepath.Join(m.backupDir, filename)
 
@@ -72,7 +73,7 @@ func (m *Manager) CreateBackup(instanceID, sourceDir, label string) (*Result, er
 		}
 
 		// Skip the backup directory itself
-		if strings.HasPrefix(path, m.backupDir) {
+		if path == m.backupDir || strings.HasPrefix(path, m.backupDir+string(os.PathSeparator)) {
 			return filepath.SkipDir
 		}
 
@@ -86,6 +87,9 @@ func (m *Manager) CreateBackup(instanceID, sourceDir, label string) (*Result, er
 			return nil
 		}
 
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("symlink cannot be backed up: %s", path)
+		}
 		// Create zip entry
 		header, err := zip.FileInfoHeader(info)
 		if err != nil {
@@ -126,6 +130,12 @@ func (m *Manager) CreateBackup(instanceID, sourceDir, label string) (*Result, er
 		return nil, fmt.Errorf("compute checksum: %w", err)
 	}
 
+	if err := VerifyArchive(backupPath, checksum); err != nil {
+		return nil, err
+	}
+	if err := mirrorS3(context.Background(), backupPath, checksum); err != nil {
+		return nil, fmt.Errorf("local backup retained; remote copy failed: %w", err)
+	}
 	// Get file size
 	stat, err := os.Stat(backupPath)
 	if err != nil {
@@ -188,6 +198,9 @@ func (m *Manager) EnforceRetention(instanceID string) ([]string, error) {
 func (m *Manager) RestoreBackup(backupPath, targetDir string) error {
 	m.log.Info("restoring backup", "backup", backupPath, "target", targetDir)
 
+	if err := VerifyArchive(backupPath, ""); err != nil {
+		return err
+	}
 	reader, err := zip.OpenReader(backupPath)
 	if err != nil {
 		return fmt.Errorf("open backup zip: %w", err)

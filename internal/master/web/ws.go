@@ -144,6 +144,16 @@ func (s *Server) handleWSLogs(c echo.Context) error {
 					break
 				}
 
+				cookie, cookieErr := c.Cookie(sessionCookieName)
+				if cookieErr != nil || s.sessions.Get(cookie.Value) == nil {
+					return
+				}
+				if role, _ := c.Get("user_role").(string); role == "viewer" {
+					continue
+				}
+				if edit, restricted := c.Get("instance_can_edit").(bool); restricted && !edit {
+					continue
+				}
 				s.log.Debug("ws command received", "instance", instanceID, "command", msg)
 
 				// instance agent as console command forward (inmemory stateful query)

@@ -81,7 +81,7 @@ func (s *Server) apiRestoreBackup(c echo.Context) error {
 	}
 	defer conn.Close()
 
-	ctx, cancel := context.WithTimeout(c.Request().Context(), 120*time.Second) // restore may take time
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 30*time.Minute) // restore may take time
 	defer cancel()
 
 	agentClient := pb.NewAgentServiceClient(conn)
@@ -118,7 +118,14 @@ func (s *Server) apiRestoreBackup(c echo.Context) error {
 }
 
 // apiCreateBackup triggers a backup creation on the agent.
-func (s *Server) apiCreateBackup(c echo.Context) error {
+func (s *Server) apiCreateBackup(c echo.Context) (resultErr error) {
+	defer func() {
+		if resultErr != nil || c.Response().Status >= 400 {
+			s.notifyOperation("backup_failed", c.Param("instanceId"), "Manual backup failed; inspect response or master logs")
+		} else {
+			s.notifyOperation("backup_completed", c.Param("instanceId"), "Backup verified and completed")
+		}
+	}()
 	instanceID := c.Param("instanceId")
 
 	// inmemory from agent query
@@ -150,7 +157,7 @@ func (s *Server) apiCreateBackup(c echo.Context) error {
 	}
 	defer conn.Close()
 
-	ctx, cancel := context.WithTimeout(c.Request().Context(), 60*time.Second) // backup may take time
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 30*time.Minute) // backup may take time
 	defer cancel()
 
 	agentClient := pb.NewAgentServiceClient(conn)

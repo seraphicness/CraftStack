@@ -15,6 +15,7 @@ func buildFileManagerHTML(data map[string]interface{}) string {
 	}
 
 	return fmt.Sprintf(`
+<script src="/static/js/transfers.js"></script>
 <style>
 .fm-wrap{display:flex;height:calc(100vh - 6rem);background:#1e1e1e;border-radius:.5rem;overflow:hidden;color:#ccc;font-family:'D2Coding','Malgun Gothic','Microsoft YaHei','Yu Gothic',monospace;font-size:13px}
 .fm-side{width:260px;min-width:160px;display:flex;flex-direction:column;background:#252526;border-right:1px solid #333}
@@ -92,6 +93,9 @@ func buildFileManagerHTML(data map[string]interface{}) string {
                     <button onclick="FM.newFile()" title="new file">&#43;</button>
                     <button onclick="FM.newDir()" title="new folder">&#128193;</button>
                     <label title="upload" style="cursor:pointer">&#8593;<input type="file" style="display:none" onchange="FM.upload(this.files);this.value=''" multiple></label>
+                    <label title="폴더 업로드">📁<input type="file" style="display:none" webkitdirectory multiple onchange="FM.upload(this.files);this.value=''"></label>
+                    <button onclick="FM.archive()" title="압축 / 배포">ZIP</button>
+                    <a href="/operations">운영</a>
                     <button onclick="FM.refresh()" title="refresh">&#8635;</button>
                 </div>
             </div>
@@ -658,9 +662,8 @@ document.addEventListener('click',()=>{document.getElementById('fm-ctx').style.d
     wrap.addEventListener('dragover',function(e){e.preventDefault()});
     wrap.addEventListener('drop',function(e){
         e.preventDefault();cnt=0;drop.style.display='none';
-        const files=[];
-        if(e.dataTransfer.items){for(let i=0;i<e.dataTransfer.items.length;i++){if(e.dataTransfer.items[i].kind==='file')files.push(e.dataTransfer.items[i].getAsFile())}}
-        if(files.length)FM.upload(files);
+        if(e.dataTransfer.types.includes('application/x-craftstack-paths'))return;
+        CSTransfers.drop(API,getSelDir(),e.dataTransfer,()=>FM.refresh()).catch(e=>showToast(e.message,'error'));
     });
 })();
 
@@ -705,23 +708,15 @@ window.FM = {
             else showToast(d.error||d.message,'error');
         }catch(e){showToast('failed: '+e.message,'error')}
     },
-    async upload(fileList){
-        const upEl=document.getElementById('fm-upload');
-        const txt=document.getElementById('fm-upload-text');
-        const bar=document.getElementById('fm-upload-bar');
-        upEl.style.display='';
-        const dir=getSelDir();let done=0;
-        for(let i=0;i<fileList.length;i++){
-            txt.textContent=fileList[i].name+' ('+(i+1)+'/'+fileList.length+')';
-            bar.value=Math.round(i/fileList.length*100);
-            try{const d=await apiUpload(fileList[i],dir);if(d.success)done++;else showToast(fileList[i].name+': failed','error')}
-            catch(e){showToast(fileList[i].name+' upload failed','error')}
-        }
-        bar.value=100;
-        setTimeout(()=>{upEl.style.display='none'},1000);
-        showToast(done+' file upload complete','success');
-        await FM.refresh();
-    }
+    async archive(){
+        const action=prompt('compress / extract / deploy / rollback','compress');if(!action)return;
+        const paths=prompt('대상 경로 (여러 개는 쉼표로 구분)','');if(paths===null)return;
+        const destination=prompt('대상 폴더 또는 출력 ZIP 경로',action==='compress'?'archive.zip':'');if(destination===null)return;
+        const deployment_id=action==='rollback'?prompt('배포 ID'):'';
+        try{const r=await fetch(API+'/files/archive',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,paths:paths.split(',').filter(Boolean),destination,deployment_id})});const d=await r.json();if(!r.ok)throw Error(d.message);alert(d.deployment_id?'복구 ID: '+d.deployment_id:'완료');await FM.refresh();}catch(e){showToast(e.message,'error');}
+    },
+    async upload(fileList){await CSTransfers.enqueue(API,getSelDir(),fileList,()=>FM.refresh());}
+
 };
 
 function collectExpanded(nodes,out){

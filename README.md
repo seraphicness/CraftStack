@@ -122,6 +122,16 @@ Unified management of six service types running as Docker containers.
 - **Full audit trail** — file operations (`write`, `delete`, `rename`, `copy`, `move`, `upload`, `mkdir`, `restore`) are logged with user attribution to the *Audit* page
 - See [docs/file-management.md](docs/file-management.md) for details
 
+### Transfers and operations
+
+- Recursive folder uploads, conflict preview, byte progress, cancellation and resumable 1 MiB transfers
+- Full-size chunked downloads, ZIP compression/extraction and stopped-server deployment snapshots/rollback
+- SHA-256 sync preview with small-text before/after views
+- Optional S3-compatible backup mirroring and ZIP integrity verification
+- Persistent scheduled restarts, per-instance access grants, and Discord-compatible webhook events
+- Admin operations page: `/operations`
+- Upgrade master and agents together; see [docs/operations.md](docs/operations.md) for configuration, workflows and limits
+
 ### Database browser
 
 - Execute SQL queries against database instances from the web UI

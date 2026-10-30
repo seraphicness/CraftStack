@@ -415,11 +415,6 @@ func (s *Server) apiUploadFile(c echo.Context) error {
 	}
 	defer src.Close()
 
-	content, err := io.ReadAll(src)
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "file read failed"})
-	}
-
 	// path directory if filename add
 	uploadPath := path
 	if uploadPath == "" || uploadPath == "." {
@@ -437,17 +432,26 @@ func (s *Server) apiUploadFile(c echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Minute)
 	defer cancel()
 
-	resp, err := client.WriteFile(ctx, &pb.WriteFileRequest{
-		InstanceId: id,
-		Path:       uploadPath,
-		Content:    content,
-		CreateDirs: true,
-	})
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	var resp *pb.ChunkResponse
+	uploadID := fmt.Sprintf("legacy-%d", time.Now().UnixNano())
+	var offset int64
+	for {
+		buf := make([]byte, 1024*1024)
+		n, readErr := io.ReadFull(src, buf)
+		if readErr != nil && readErr != io.EOF && readErr != io.ErrUnexpectedEOF {
+			return readErr
+		}
+		resp, err = client.UploadChunk(ctx, &pb.UploadChunkRequest{InstanceId: id, Path: uploadPath, UploadId: uploadID, Offset: offset, Total: file.Size, Content: buf[:n], Conflict: "overwrite"})
+		if err != nil {
+			return echo.NewHTTPError(500, err.Error())
+		}
+		offset = resp.Offset
+		if resp.Complete {
+			break
+		}
 	}
 
-	s.auditFileAction(c, "upload", id, uploadPath, fmt.Sprintf("%d bytes", len(content)))
+	s.auditFileAction(c, "upload", id, uploadPath, fmt.Sprintf("%d bytes", file.Size))
 	go s.gitCommitFiles(context.Background(), c, id, []string{uploadPath}, "upload")
 	return c.JSON(http.StatusOK, resp)
 }
@@ -534,12 +538,9 @@ func (s *Server) apiDownloadFile(c echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Minute)
 	defer cancel()
 
-	resp, err := client.ReadFile(ctx, &pb.ReadFileRequest{
-		InstanceId: id,
-		Path:       path,
-	})
+	resp, err := client.ReadChunk(ctx, &pb.ChunkRequest{InstanceId: id, Path: path})
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return echo.NewHTTPError(500, err.Error())
 	}
 
 	// Extract filename from path
@@ -555,21 +556,18 @@ func (s *Server) apiDownloadFile(c echo.Context) error {
 	c.Response().Header().Set("Content-Disposition",
 		fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, filename, url.PathEscape(filename)))
 	c.Response().Header().Set("Content-Type", "application/octet-stream")
-	c.Response().Header().Set("Content-Length", fmt.Sprintf("%d", len(resp.Content)))
+	c.Response().Header().Set("Content-Length", fmt.Sprintf("%d", resp.Size))
 	c.Response().WriteHeader(http.StatusOK)
-
-	// Write in chunks to avoid holding full buffer in HTTP layer
-	buf := resp.Content
-	for len(buf) > 0 {
-		n := len(buf)
-		if n > 64*1024 {
-			n = 64 * 1024 // 64KB chunks
-		}
-		if _, err := c.Response().Write(buf[:n]); err != nil {
+	for {
+		if _, err = c.Response().Write(resp.Content); err != nil {
 			return err
 		}
-		c.Response().Flush()
-		buf = buf[n:]
+		if resp.Complete {
+			return nil
+		}
+		resp, err = client.ReadChunk(ctx, &pb.ChunkRequest{InstanceId: id, Path: path, Offset: resp.Offset})
+		if err != nil {
+			return err
+		}
 	}
-	return nil
 }

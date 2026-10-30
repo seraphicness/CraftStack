@@ -55,10 +55,16 @@ func (s *fileManagerServiceImpl) resolveInstancePath(instanceID, relPath string)
 	}
 
 	// Path traversal check
-	if !strings.HasPrefix(absTarget, absWorkDir) {
+	if absTarget != absWorkDir && !strings.HasPrefix(absTarget, absWorkDir+string(os.PathSeparator)) {
 		return "", fmt.Errorf("access reject: work directory external path")
 	}
 
+	// Reject symlink components, including existing parents of new uploads.
+	for p := absTarget; p != absWorkDir; p = filepath.Dir(p) {
+		if info, err := os.Lstat(p); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("symlink paths are not allowed")
+		}
+	}
 	return absTarget, nil
 }
 
@@ -118,7 +124,12 @@ func (s *fileManagerServiceImpl) ReadFile(ctx context.Context, req *pb.ReadFileR
 	}
 
 	truncated := false
-	content, err := os.ReadFile(filePath)
+	f, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	content, err := io.ReadAll(io.LimitReader(f, maxReadFileSize+1))
 	if err != nil {
 		return nil, fmt.Errorf("file read failed: %w", err)
 	}
@@ -229,6 +240,9 @@ func (s *fileManagerServiceImpl) RenameFile(ctx context.Context, req *pb.RenameF
 		return nil, err
 	}
 
+	if err := os.MkdirAll(filepath.Dir(newPath), 0755); err != nil {
+		return nil, err
+	}
 	if err := os.Rename(oldPath, newPath); err != nil {
 		return nil, fmt.Errorf("name change failed: %w", err)
 	}

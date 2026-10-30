@@ -10,11 +10,10 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-
 // Template functions available in all templates.
 var funcMap = template.FuncMap{
 	"upper": strings.ToUpper,
-	"": strings.ToLower,
+	"":      strings.ToLower,
 	"formatTime": func(t time.Time) string {
 		return t.Format("2006-01-02 15:04:05")
 	},
@@ -88,7 +87,7 @@ func buildPageHTML(page string, data map[string]interface{}) string {
 	// adminonly user management link display
 	usersLink := ""
 	if currentRole == "admin" {
-		usersLink = fmt.Sprintf(`<li><a href="/users" class="%s">user</a></li>`, activeClass(page, "users"))
+		usersLink = `<li><a href="/operations">운영 작업</a></li>` + fmt.Sprintf(`<li><a href="/users" class="%s">user</a></li>`, activeClass(page, "users"))
 	}
 
 	// audit log link (all authenticated users)
@@ -291,6 +290,8 @@ func activeClass(current, page string) string {
 // buildPartialHTML generates HTML for each page/partial.
 func buildPartialHTML(name string, data map[string]interface{}) string {
 	switch name {
+	case "operations":
+		return buildOperationsHTML()
 	case "dashboard":
 		return buildDashboardHTML(data)
 	case "dashboard_stats":
@@ -488,7 +489,6 @@ func getFloat(data map[string]interface{}, key string) float64 {
 	}
 	return 0
 }
-
 
 // jsStr returns a JSON-encoded string for safe embedding in JavaScript.
 func jsStr(s string) string {

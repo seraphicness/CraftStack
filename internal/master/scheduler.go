@@ -90,6 +90,17 @@ func (s *BackupScheduler) tick() {
 
 // runBackup triggers a backup for a single instance via the agent RPC.
 func (s *BackupScheduler) runBackup(inst *store.Instance) {
+	completed := false
+	defer func() {
+		event := "backup_failed"
+		detail := "Scheduled backup failed or agent unavailable; inspect master logs"
+		if completed {
+			event = "backup_completed"
+			detail = "Scheduled backup verified and completed"
+		}
+		_, _ = s.db.Exec("INSERT INTO operation_events(event,instance_id,detail) VALUES(?,?,?)", event, inst.ID, detail)
+	}()
+
 	agentID, found := s.grpc.GetInstanceOwner(inst.ID)
 	if !found {
 		s.log.Warn("schedule backup skip: agent notconnect", "instance", inst.Name)
@@ -114,7 +125,7 @@ func (s *BackupScheduler) runBackup(inst *store.Instance) {
 	}
 	defer conn.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 
 	agentClient := pb.NewAgentServiceClient(conn)
@@ -162,6 +173,7 @@ func (s *BackupScheduler) runBackup(inst *store.Instance) {
 		}
 	}
 
+	completed = true
 	s.log.Info("schedule backup complete", "instance", inst.Name, "file", resp.FilePath)
 }
 

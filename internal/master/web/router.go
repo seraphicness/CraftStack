@@ -199,7 +199,7 @@ func (s *Server) registerRoutes() {
 	s.echo.GET("/logout", s.apiLogout)
 
 	// ─── authentication required (logged-in users) ───
-	auth := s.echo.Group("", s.authMiddleware)
+	auth := s.echo.Group("", s.authMiddleware, s.instanceAccess)
 
 	// Pages (HTML rendered via Go code)
 	auth.GET("/", s.handleDashboard)
@@ -220,6 +220,13 @@ func (s *Server) registerRoutes() {
 	// user management (admin only)
 	auth.GET("/users", s.handleUsersPage, s.adminOnly)
 
+	auth.GET("/operations", s.handleOperations, s.adminOnly)
+	auth.GET("/api/operations", s.apiOperations, s.adminOnly)
+	auth.POST("/api/operations", s.apiSaveOperation, s.adminOnly)
+	auth.DELETE("/api/operations/:operationID", s.apiDeleteOperation, s.adminOnly)
+	auth.PUT("/api/operations/settings", s.apiOperationSettings, s.adminOnly)
+	auth.GET("/api/operations/permissions", s.apiGetInstancePermissions, s.adminOnly)
+	auth.PUT("/api/operations/permissions", s.apiInstancePermissions, s.adminOnly)
 	// API endpoints (JSON) — authentication required
 	api := auth.Group("/api")
 
@@ -261,6 +268,10 @@ func (s *Server) registerRoutes() {
 	apiEdit.POST("/instances/:id/files/batch-delete", s.apiBatchDeleteFiles)
 	apiEdit.POST("/instances/:id/files/restore", s.apiFileRestore)
 	apiEdit.POST("/instances/:id/files/upload", s.apiUploadFile)
+	apiEdit.POST("/instances/:id/files/chunks", s.apiUploadChunk)
+	apiEdit.DELETE("/instances/:id/files/chunks", s.apiUploadChunk)
+	apiEdit.POST("/instances/:id/files/archive", s.apiArchive)
+	apiEdit.GET("/sync/mappings/:mappingId/preview", s.apiSyncPreview)
 	apiEdit.PUT("/sync/files", s.apiWriteSyncFile)
 	apiEdit.DELETE("/sync/files", s.apiDeleteSyncFile)
 	apiEdit.POST("/sync/files/mkdir", s.apiCreateSyncDir)
@@ -325,6 +336,7 @@ func (s *Server) registerRoutes() {
 
 // Start starts the HTTP server.
 func (s *Server) Start(addr string) error {
+	go s.runOperations()
 	// Start WebSocket hub
 	go s.hub.Run()
 

@@ -322,5 +322,13 @@ func getMigrations() []migration {
 				CREATE INDEX IF NOT EXISTS idx_instance_metrics_inst_time ON instance_metrics(instance_id, recorded_at DESC);
 			`,
 		},
+		{version: 14, name: "operations", sql: `
+CREATE TABLE instance_acl (user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, instance_id TEXT NOT NULL REFERENCES instances(id) ON DELETE CASCADE, can_edit INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(user_id,instance_id));
+CREATE TABLE scoped_users (user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE);
+CREATE TABLE deployments (id TEXT PRIMARY KEY,instance_id TEXT NOT NULL,description TEXT NOT NULL,created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE operations (id INTEGER PRIMARY KEY AUTOINCREMENT,instance_id TEXT NOT NULL REFERENCES instances(id) ON DELETE CASCADE,name TEXT NOT NULL,interval_minutes INTEGER NOT NULL,next_run INTEGER NOT NULL,announcement TEXT NOT NULL DEFAULT '',enabled INTEGER NOT NULL DEFAULT 1,status TEXT NOT NULL DEFAULT 'pending',last_error TEXT NOT NULL DEFAULT '');
+CREATE TABLE operation_settings (key TEXT PRIMARY KEY,value TEXT NOT NULL);
+CREATE TABLE operation_events (id INTEGER PRIMARY KEY AUTOINCREMENT,event TEXT NOT NULL,instance_id TEXT NOT NULL,detail TEXT NOT NULL,delivered INTEGER NOT NULL DEFAULT 0,attempts INTEGER NOT NULL DEFAULT 0,created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
+`},
 	}
 }

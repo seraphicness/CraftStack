@@ -21,6 +21,7 @@ func (s *Server) handleInstances(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
+	instances = s.visibleInstances(c, instances)
 	s.overlayInstanceStatus(instances)
 
 	// online agent list (create instance modal)
@@ -94,6 +95,7 @@ func (s *Server) apiListInstances(c echo.Context) error {
 	if instances == nil {
 		instances = []*store.Instance{}
 	}
+	instances = s.visibleInstances(c, instances)
 	s.overlayInstanceStatus(instances)
 	return c.JSON(http.StatusOK, instances)
 }
@@ -1090,6 +1092,7 @@ func (s *Server) htmxInstancesTable(c echo.Context) error {
 	if err != nil {
 		return c.HTML(http.StatusInternalServerError, `<div class="alert alert-error">instance list load cannot</div>`)
 	}
+	instances = s.visibleInstances(c, instances)
 	s.overlayInstanceStatus(instances)
 	data := map[string]interface{}{"Instances": instances}
 	s.enrichInstanceNetworkData(data, instances)
@@ -1113,6 +1116,7 @@ func (s *Server) htmxDashboardStats(c echo.Context) error {
 	nodes, _ := s.db.ListNodes()
 	s.overlayNodeStatus(nodes)
 	instances, _ := s.db.ListInstances("")
+	instances = s.visibleInstances(c, instances)
 	s.overlayInstanceStatus(instances)
 
 	onlineNodes := 0

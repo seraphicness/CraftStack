@@ -7,6 +7,9 @@ option go_package = "craftstack/gen/proto/craftstack";
 // FileManagerService handles file browsing, reading, writing within instance directories.
 // Runs on the agent, called by master on behalf of web UI.
 service FileManagerService {
+  rpc ReadChunk(ChunkRequest) returns (ChunkResponse);
+  rpc UploadChunk(UploadChunkRequest) returns (ChunkResponse);
+  rpc Archive(ArchiveRequest) returns (ArchiveResponse);
   // ListDirectory returns the contents of a directory.
   rpc ListDirectory(ListDirectoryRequest) returns (ListDirectoryResponse);
 
@@ -40,6 +43,19 @@ service FileManagerService {
   // A new commit recording the rollback is created automatically.
   rpc GitRestore(GitRestoreRequest) returns (GitRestoreResponse);
 }
+
+message ChunkRequest { string instance_id = 1; string path = 2; int64 offset = 3; }
+message ChunkResponse { bytes content = 1; int64 offset = 2; int64 size = 3; string path = 4; bool complete = 5; }
+message UploadChunkRequest {
+  string instance_id = 1; string path = 2; string upload_id = 3;
+  int64 offset = 4; int64 total = 5; bytes content = 6;
+  string conflict = 7; bool cancel = 8; bool status = 9;
+}
+message ArchiveRequest {
+  string instance_id = 1; string action = 2; repeated string paths = 3;
+  string destination = 4; string deployment_id = 5;
+}
+message ArchiveResponse { bool success = 1; string path = 2; string deployment_id = 3; string message = 4; }
 
 // --- List Directory ---
 
